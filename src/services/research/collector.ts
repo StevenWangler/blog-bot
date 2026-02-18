@@ -49,7 +49,7 @@ export async function collectResearch(
     `Prefer sources published within the last ${options.maxSourceAgeDays} days when available.`,
     "Prioritize items that include concrete dates, measurements, and named organizations.",
     "Return JSON only with fields: topic, summary, sources, claims.",
-    "Each source item: url, title, summary, publishedAt (ISO date when known).",
+    "Each source item: url, title, summary, publishedAt (ISO date when known, else empty string).",
     "Each claim item: text, sourceUrls (must reference URLs from sources).",
     "Do not include unsupported claims. Do not include markdown.",
   ].join(" ");
@@ -85,7 +85,7 @@ export async function collectResearch(
               items: {
                 type: "object",
                 additionalProperties: false,
-                required: ["url", "title"],
+                required: ["url", "title", "summary", "publishedAt"],
                 properties: {
                   url: { type: "string" },
                   title: { type: "string" },

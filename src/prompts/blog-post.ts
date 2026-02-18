@@ -24,6 +24,7 @@ export function buildBlogPostPrompt(agent: AgentConfig, dossier: ValidatedResear
     "Do not drift into unrelated business, marketing, or generic productivity topics.",
     "For factual or quantitative statements, include inline numeric citations like [1], [2].",
     "End the article with '## Sources' and numbered references matching the citations.",
+    "In ## Sources, use one line per source in one of these formats: '[1] Source Title https://example.com' or '1. Source Title https://example.com'.",
     "Return JSON with keys: title, outline, bodyMarkdown, excerpt.",
     "Keep bodyMarkdown under 1200 words.",
   ].join(" ");

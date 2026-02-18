@@ -5,6 +5,7 @@ import { createRunLogger, logger } from "../../utils/logger.js";
 import { loadAgents } from "../../agents/loader.js";
 import { selectDueAgents } from "../../agents/scheduler.js";
 import { createOpenAIClient } from "../../services/openai/client.js";
+import { generateImage } from "../../services/openai/images.js";
 import { generateBlogPost } from "../../services/content-generator.js";
 import { runResearchPipeline } from "../../services/research/index.js";
 import { createWixClient } from "../../services/wix/client.js";
@@ -83,16 +84,8 @@ export async function runPostCommand(options: RunPostOptions = {}): Promise<Post
       );
 
       runLogger.info(`Generating image for ${agent.name}`);
-      const image = await openai.images.generate({
-        model: config.OPENAI_IMAGE_MODEL,
-        prompt: post.imagePrompt,
-        size: "1024x1024",
-        response_format: "b64_json",
-      });
-      const base64 = image.data?.[0]?.b64_json;
-      if (!base64) {
-        throw new Error("OpenAI image generation failed.");
-      }
+      const image = await generateImage(openai, config.OPENAI_IMAGE_MODEL, post.imagePrompt);
+      const base64 = image.base64;
       const createdAt = new Date().toISOString();
       let postRecord: PostRecord;
 
@@ -126,7 +119,7 @@ export async function runPostCommand(options: RunPostOptions = {}): Promise<Post
           wixClient,
           `${agent.id}-${Date.now()}.png`,
           base64,
-          "image/png"
+          image.mimeType
         );
 
         const payload = buildDraftPostPayload(

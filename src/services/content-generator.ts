@@ -51,7 +51,7 @@ export async function generateBlogPost(
       : await generateJson(
           client,
           model,
-          `${basePrompt}\nFix the citation issues:\n${firstValidation.errors.join("\n")}`,
+          `${basePrompt}\nFix the citation issues below while preserving the article's core points.\nRules:\n- Every inline citation must use [n].\n- In ## Sources, format each cited source as either [n] Title https://... or n. Title https://...\n- Ensure factual statements about measurements, benchmarks, studies, reports, or percentages include [n].\nIssues:\n${firstValidation.errors.join("\n")}`,
           blogSchema
         );
 
@@ -134,7 +134,10 @@ export function validatePostCitations(
   }
 
   for (const cited of citedNumbers) {
-    const sourcePattern = new RegExp(`\\[${cited}\\]\\s+.+https?:\\/\\/`, "i");
+    const sourcePattern = new RegExp(
+      `(?:^|\\n)\\s*(?:[-*]\\s*)?(?:\\[${cited}\\]|${cited}[.)])\\s+.+https?:\\/\\/`,
+      "i"
+    );
     if (!sourcePattern.test(sourcesSection)) {
       errors.push(`Sources section missing reference entry for [${cited}].`);
     }
@@ -147,8 +150,10 @@ export function validatePostCitations(
     .filter(Boolean);
   for (const sentence of sentences) {
     const factual =
-      /\d/.test(sentence) ||
-      /\b(study|survey|report|according|benchmark|percent|data|research)\b/i.test(sentence);
+      /\b(study|survey|paper|dataset|experiment)\b/i.test(sentence) ||
+      /\baccording to\b/i.test(sentence) ||
+      /\b\d+(\.\d+)?%\b/.test(sentence) ||
+      /\b\d+(\.\d+)?\s*(percent|percentage points?)\b/i.test(sentence);
     if (!factual) continue;
     if (!/\[\d+\]/.test(sentence)) {
       errors.push(`Factual sentence missing citation: "${sentence.slice(0, 80)}..."`);

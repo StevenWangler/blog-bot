@@ -15,6 +15,7 @@ cp .env.example .env
 ```
 
 Populate `.env` with your API keys and Wix configuration.
+`OPENAI_IMAGE_MODEL=gpt-image-1` is the safest default; `chatgpt-image-latest` may require organization verification.
 
 ## Commands
 ```bash
