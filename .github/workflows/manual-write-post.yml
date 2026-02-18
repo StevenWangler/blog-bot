@@ -1,0 +1,69 @@
+name: Blog Bot - Write Post
+
+on:
+  workflow_dispatch:
+    inputs:
+      agent_id:
+        description: "Optional agent id (for example: kai-ml)"
+        required: false
+        default: ""
+
+jobs:
+  write-post:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate and publish one post
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
+          OPENAI_IMAGE_MODEL: ${{ secrets.OPENAI_IMAGE_MODEL || 'gpt-image-1' }}
+          RESEARCH_MODEL: ${{ secrets.RESEARCH_MODEL || 'gpt-4.1-mini' }}
+          WIX_API_TOKEN: ${{ secrets.WIX_API_TOKEN }}
+          WIX_SITE_ID: ${{ secrets.WIX_SITE_ID }}
+          WIX_MEMBER_ID: ${{ secrets.WIX_MEMBER_ID }}
+          BLOG_LANGUAGE: ${{ secrets.BLOG_LANGUAGE || 'en' }}
+          BLOG_CATEGORY_IDS: ${{ secrets.BLOG_CATEGORY_IDS || '' }}
+          BLOG_TAG_IDS: ${{ secrets.BLOG_TAG_IDS || '' }}
+          STATE_PATH: ./data/state.json
+          RESEARCH_PATH: ./data/research
+          MIN_SOURCES_PER_POST: ${{ secrets.MIN_SOURCES_PER_POST || '5' }}
+          MAX_SOURCE_AGE_DAYS: ${{ secrets.MAX_SOURCE_AGE_DAYS || '365' }}
+          MAX_RESEARCH_ATTEMPTS: ${{ secrets.MAX_RESEARCH_ATTEMPTS || '2' }}
+          SCHEDULE_TIMEZONE: ${{ secrets.SCHEDULE_TIMEZONE || 'America/New_York' }}
+        run: |
+          npm run build
+          if [ -n "${{ github.event.inputs.agent_id }}" ]; then
+            node dist/index.js post --ignore-schedule --max-posts 1 --agent-id "${{ github.event.inputs.agent_id }}"
+          else
+            node dist/index.js post --ignore-schedule --max-posts 1
+          fi
+
+      - name: Commit state and research artifacts
+        run: |
+          if ! git diff --quiet -- data/state.json data/research; then
+            git config user.name "blog-bot[bot]"
+            git config user.email "blog-bot[bot]@users.noreply.github.com"
+            git add -A data/state.json data/research || true
+            if git diff --cached --quiet; then
+              echo "No staged data changes."
+              exit 0
+            fi
+            git commit -m "chore: persist bot state and research artifacts"
+            git push
+          else
+            echo "No state/research changes to commit."
+          fi

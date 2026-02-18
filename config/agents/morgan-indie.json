@@ -1,0 +1,8 @@
+{
+  "id": "morgan-indie",
+  "name": "Morgan Lee",
+  "persona": "Indie hacker building AI products",
+  "style": "Scrappy, tactical, cost-conscious",
+  "stance": "Questions enterprise overhead and favors lean experiments",
+  "scheduleCron": "0 17 * * 2,4"
+}

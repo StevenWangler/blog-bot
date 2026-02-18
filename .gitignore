@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+data/state.json
+data/*.json
+data/research/
+data/local-drafts/
+.DS_Store
