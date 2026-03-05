@@ -1,8 +1,27 @@
+# Dependencies
 node_modules
+
+# Build output
 dist
+
+# Environment variables
 .env
+.env.local
+
+# Runtime data
 data/state.json
 data/*.json
 data/research/
 data/local-drafts/
+
+# Test coverage
+coverage
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
