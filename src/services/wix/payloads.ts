@@ -3,17 +3,15 @@ import { buildImageNode, buildRichContentFromMarkdown } from "./rich-content.js"
 export function buildDraftPostPayload(
   title: string,
   markdown: string,
-  excerpt: string,
+  rawExcerpt: string,
   language: string,
   memberId: string,
   heroImageUrl?: string,
   categoryIds: string[] = [],
   tagIds: string[] = []
 ): Record<string, unknown> {
+  const excerpt = rawExcerpt.length > 500 ? rawExcerpt.slice(0, 497) + "..." : rawExcerpt;
   const richContent = buildRichContentFromMarkdown(markdown);
-  if (heroImageUrl) {
-    (richContent.nodes as Array<Record<string, unknown>>).unshift(buildImageNode(heroImageUrl));
-  }
   return {
     draftPost: {
       title,
@@ -24,13 +22,13 @@ export function buildDraftPostPayload(
       categoryIds,
       tagIds,
       richContent,
-      heroImage: heroImageUrl
+      coverMedia: heroImageUrl
         ? {
-            type: "SITE",
-            siteData: { url: heroImageUrl },
+            image: heroImageUrl,
+            displayed: true,
           }
         : undefined,
     },
-    fieldsets: ["URL", "RICH_CONTENT", "COVER_MEDIA"],
+    fieldsets: ["URL", "RICH_CONTENT"],
   };
 }

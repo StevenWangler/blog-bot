@@ -1,0 +1,59 @@
+name: "Blog Bot - Scheduled Respond"
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: blog-bot-respond
+  cancel-in-progress: false
+
+jobs:
+  respond-to-humans:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Respond to human comments
+        run: node dist/index.js respond
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
+          WIX_API_TOKEN: ${{ secrets.WIX_API_TOKEN }}
+          WIX_SITE_ID: ${{ secrets.WIX_SITE_ID }}
+          WIX_MEMBER_ID: ${{ secrets.WIX_MEMBER_ID }}
+          STATE_PATH: ./data/state.json
+          SCHEDULE_TIMEZONE: ${{ secrets.SCHEDULE_TIMEZONE || 'America/New_York' }}
+
+      - name: Commit state updates
+        run: |
+          if ! git diff --quiet -- data/state.json; then
+            git config user.name "blog-bot[bot]"
+            git config user.email "blog-bot[bot]@users.noreply.github.com"
+            git add -A data/state.json || true
+            if git diff --cached --quiet; then
+              echo "No staged state changes."
+              exit 0
+            fi
+            git commit -m "chore: persist bot response state [skip ci]"
+            git pull --rebase
+            git push
+          else
+            echo "No state changes to commit."
+          fi

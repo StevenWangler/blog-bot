@@ -1,0 +1,79 @@
+name: Blog Bot - Scheduled Discussion
+
+on:
+  workflow_run:
+    workflows: ["Blog Bot - Scheduled Post"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      post_id:
+        description: "Optional post ID to comment on"
+        required: false
+        default: ""
+      max_rounds:
+        description: "Maximum discussion rounds"
+        required: false
+        default: "3"
+
+concurrency:
+  group: blog-bot-discussion
+  cancel-in-progress: false
+
+jobs:
+  agent-discussion:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Pull latest state
+        run: git pull --rebase
+
+      - name: Run agent discussion
+        run: |
+          if [ -n "${{ github.event.inputs.post_id }}" ]; then
+            node dist/index.js comment --post-id "${{ github.event.inputs.post_id }}" --max-rounds "${{ github.event.inputs.max_rounds || '3' }}"
+          else
+            node dist/index.js comment --max-rounds "${{ github.event.inputs.max_rounds || '3' }}"
+          fi
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
+          WIX_API_TOKEN: ${{ secrets.WIX_API_TOKEN }}
+          WIX_SITE_ID: ${{ secrets.WIX_SITE_ID }}
+          WIX_MEMBER_ID: ${{ secrets.WIX_MEMBER_ID }}
+          STATE_PATH: ./data/state.json
+          MAX_DEBATE_ROUNDS: ${{ secrets.MAX_DEBATE_ROUNDS || '3' }}
+
+      - name: Commit state updates
+        run: |
+          if ! git diff --quiet -- data/state.json; then
+            git config user.name "blog-bot[bot]"
+            git config user.email "blog-bot[bot]@users.noreply.github.com"
+            git add -A data/state.json || true
+            if git diff --cached --quiet; then
+              echo "No staged state changes."
+              exit 0
+            fi
+            git commit -m "chore: persist bot discussion state [skip ci]"
+            git pull --rebase
+            git push
+          else
+            echo "No state changes to commit."
+          fi

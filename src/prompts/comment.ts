@@ -22,7 +22,9 @@ export function buildAgentCommentPrompt(
     `Prior thread context:\n${priorThreadMarkdown || "No prior comments."}`,
     `Citation catalog:\n${citationCatalog}`,
     "Write a concise comment (80-170 words) that advances the discussion.",
-    "If you include factual or quantitative claims, cite with numeric markers like [1].",
+    "Opinions and interpretation are allowed without citations.",
+    "Any factual or quantitative claim must include inline numeric citations like [1] that map to entries in the citation catalog.",
+    "Do not invent citation numbers or cite outside the provided citation catalog.",
     "Return JSON with keys: commentMarkdown, stanceSummary, citationsUsed.",
   ].join(" ");
 }

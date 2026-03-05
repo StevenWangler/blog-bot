@@ -10,6 +10,7 @@ export async function wixFetch<T>(
     ...init,
     headers: {
       Authorization: client.token,
+      "wix-site-id": client.siteId,
       "Content-Type": "application/json",
       ...(init.headers ?? {}),
     },

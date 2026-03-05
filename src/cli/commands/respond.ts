@@ -1,10 +1,11 @@
+import fs from "node:fs";
 import { loadConfig } from "../../utils/config.js";
 import { createRunLogger, logger } from "../../utils/logger.js";
 import { loadAgents } from "../../agents/loader.js";
 import { pickAgent } from "../../agents/manager.js";
 import { loadState, saveState } from "../../state/store.js";
 import { createOpenAIClient } from "../../services/openai/client.js";
-import { generateHumanReply } from "../../services/content-generator.js";
+import { generateHumanReply, validateFactualClaimCitations } from "../../services/content-generator.js";
 import { createWixClient } from "../../services/wix/client.js";
 import { createComment, listComments } from "../../services/wix/comments.js";
 import { buildRichContentFromMarkdown } from "../../services/wix/rich-content.js";
@@ -39,6 +40,7 @@ export async function runRespondCommand(options: RunRespondOptions = {}): Promis
     runLogger.info("No posts available to respond to.");
     return 0;
   }
+  const citationContext = loadCitationCatalogContext(state, recentPost.id);
 
   const commentsResponse = await listComments(wixClient, recentPost.id, 50);
   const comments = commentsResponse.comments ?? [];
@@ -52,13 +54,36 @@ export async function runRespondCommand(options: RunRespondOptions = {}): Promis
 
     const agent = pickAgent(agents);
     const rawText = JSON.stringify(comment.content?.richContent ?? {});
-    const reply = await generateHumanReply(
+    let reply = await generateHumanReply(
       openai,
       config.OPENAI_MODEL,
       agent,
       recentPost.title,
-      rawText
+      rawText,
+      citationContext.citationCatalog
     );
+    let citationValidation = validateFactualClaimCitations(reply.replyMarkdown, citationContext.sourceCount);
+    if (!citationValidation.ok) {
+      logger.warn("Retrying human reply after citation validation failure.", {
+        postId: recentPost.id,
+        parentCommentId: comment.id,
+        errors: citationValidation.errors,
+      });
+      reply = await generateHumanReply(
+        openai,
+        config.OPENAI_MODEL,
+        agent,
+        recentPost.title,
+        rawText,
+        citationContext.citationCatalog
+      );
+      citationValidation = validateFactualClaimCitations(reply.replyMarkdown, citationContext.sourceCount);
+    }
+    if (!citationValidation.ok) {
+      throw new Error(
+        `Failed to generate citation-compliant reply for comment ${comment.id}: ${citationValidation.errors.join(" | ")}`
+      );
+    }
 
     const richContent = buildRichContentFromMarkdown(reply.replyMarkdown);
     const wixComment = await createComment(
@@ -90,4 +115,34 @@ export async function runRespondCommand(options: RunRespondOptions = {}): Promis
   saveState(config.STATE_PATH, state);
   runLogger.info("Responded to new human comments.", { replies });
   return replies;
+}
+
+function loadCitationCatalogContext(
+  state: ReturnType<typeof loadState>,
+  postId: string
+): { citationCatalog: string; sourceCount: number } {
+  const artifact = [...state.researchArtifacts].reverse().find((record) => record.postId === postId);
+  if (!artifact) {
+    return { citationCatalog: "No citation catalog available.", sourceCount: 0 };
+  }
+  if (!fs.existsSync(artifact.dossierPath)) {
+    return { citationCatalog: "No citation catalog available.", sourceCount: 0 };
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(artifact.dossierPath, "utf8")) as {
+      sources?: Array<{ title?: string; url?: string }>;
+    };
+    const sources = parsed.sources ?? [];
+    if (sources.length === 0) {
+      return { citationCatalog: "No citation catalog available.", sourceCount: 0 };
+    }
+    return {
+      citationCatalog: sources
+        .map((source, index) => `[${index + 1}] ${source.title ?? "Untitled"} (${source.url ?? "missing-url"})`)
+        .join("\n"),
+      sourceCount: sources.length,
+    };
+  } catch {
+    return { citationCatalog: "No citation catalog available.", sourceCount: 0 };
+  }
 }

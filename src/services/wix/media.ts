@@ -59,6 +59,7 @@ export async function uploadImageFromBase64(
   const output: { fileId?: string; url?: string } = {};
   if (result?.file?.id) {
     output.fileId = result.file.id;
+    output.url = `wix:image://v1/${result.file.id}/${fileName}#originWidth=1024&originHeight=1024`;
   }
   if (result?.file?.url) {
     output.url = result.file.url;

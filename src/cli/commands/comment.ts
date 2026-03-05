@@ -7,7 +7,7 @@ import { AgentConfig } from "../../agents/types.js";
 import { DebateRecord } from "../../state/types.js";
 import { loadState, saveState } from "../../state/store.js";
 import { createOpenAIClient } from "../../services/openai/client.js";
-import { generateAgentComment } from "../../services/content-generator.js";
+import { generateAgentComment, validateFactualClaimCitations } from "../../services/content-generator.js";
 import { createWixClient } from "../../services/wix/client.js";
 import { createComment } from "../../services/wix/comments.js";
 import { buildRichContentFromMarkdown } from "../../services/wix/rich-content.js";
@@ -50,7 +50,7 @@ export async function runCommentCommand(options: RunCommentOptions = {}): Promis
 
   const maxRounds = Math.min(options.maxRounds ?? config.MAX_DEBATE_ROUNDS, 3);
   const roundAgents = selectDebateAgents(agents, recentPost.agentId);
-  const citationCatalog = loadCitationCatalog(state, recentPost.id);
+  const { catalog: citationCatalog, maxSourceNumber } = loadCitationCatalog(state, recentPost.id);
   const debate: DebateRecord = {
     id: createRunId("debate"),
     postId: recentPost.id,
@@ -65,17 +65,34 @@ export async function runCommentCommand(options: RunCommentOptions = {}): Promis
     const roundAgent = roundAgents[round - 1];
     if (!roundAgent) break;
     const role = round === 1 ? "critic" : round === 2 ? "author_rebuttal" : "synthesizer";
-    const generated = await generateAgentComment(
-      openai,
-      config.OPENAI_MODEL,
-      roundAgent,
-      recentPost.title,
-      recentPost.title,
-      role,
-      round,
-      priorThreadMarkdown,
-      citationCatalog
-    );
+    const generateRoundComment = () =>
+      generateAgentComment(
+        openai,
+        config.OPENAI_MODEL,
+        roundAgent,
+        recentPost.title,
+        recentPost.title,
+        role,
+        round,
+        priorThreadMarkdown,
+        citationCatalog
+      );
+    let generated = await generateRoundComment();
+    let citationValidation = validateFactualClaimCitations(generated.commentMarkdown, maxSourceNumber);
+    if (!citationValidation.ok) {
+      runLogger.warn("Generated comment failed citation validation; retrying once.", {
+        round,
+        agentId: roundAgent.id,
+        errors: citationValidation.errors,
+      });
+      generated = await generateRoundComment();
+      citationValidation = validateFactualClaimCitations(generated.commentMarkdown, maxSourceNumber);
+      if (!citationValidation.ok) {
+        throw new Error(
+          `Round ${round} failed factual citation validation after retry: ${citationValidation.errors.join(" | ")}`
+        );
+      }
+    }
 
     const richContent = buildRichContentFromMarkdown(generated.commentMarkdown);
     const wixComment = await createComment(
@@ -128,20 +145,27 @@ function selectDebateAgents(agents: AgentConfig[], authorAgentId: string): Agent
   return [critic, author, synthesizer];
 }
 
-function loadCitationCatalog(state: ReturnType<typeof loadState>, postId: string): string {
+function loadCitationCatalog(
+  state: ReturnType<typeof loadState>,
+  postId: string
+): { catalog: string; maxSourceNumber: number } {
+  const noCatalog = { catalog: "No citation catalog available.", maxSourceNumber: 0 };
   const artifact = [...state.researchArtifacts].reverse().find((record) => record.postId === postId);
-  if (!artifact) return "No citation catalog available.";
-  if (!fs.existsSync(artifact.dossierPath)) return "No citation catalog available.";
+  if (!artifact) return noCatalog;
+  if (!fs.existsSync(artifact.dossierPath)) return noCatalog;
   try {
     const parsed = JSON.parse(fs.readFileSync(artifact.dossierPath, "utf8")) as {
       sources?: Array<{ title?: string; url?: string }>;
     };
     const sources = parsed.sources ?? [];
-    if (sources.length === 0) return "No citation catalog available.";
-    return sources
-      .map((source, index) => `[${index + 1}] ${source.title ?? "Untitled"} (${source.url ?? "missing-url"})`)
-      .join("\n");
+    if (sources.length === 0) return noCatalog;
+    return {
+      catalog: sources
+        .map((source, index) => `[${index + 1}] ${source.title ?? "Untitled"} (${source.url ?? "missing-url"})`)
+        .join("\n"),
+      maxSourceNumber: sources.length,
+    };
   } catch {
-    return "No citation catalog available.";
+    return noCatalog;
   }
 }

@@ -43,22 +43,7 @@ export async function generateBlogPost(
     excerpt: z.string().min(30),
   });
 
-  const firstDraft = await generateJson(client, model, basePrompt, blogSchema);
-  const firstValidation = validatePostCitations(firstDraft.bodyMarkdown, sourceCount);
-  const draft =
-    firstValidation.ok
-      ? firstDraft
-      : await generateJson(
-          client,
-          model,
-          `${basePrompt}\nFix the citation issues below while preserving the article's core points.\nRules:\n- Every inline citation must use [n].\n- In ## Sources, format each cited source as either [n] Title https://... or n. Title https://...\n- Ensure factual statements about measurements, benchmarks, studies, reports, or percentages include [n].\nIssues:\n${firstValidation.errors.join("\n")}`,
-          blogSchema
-        );
-
-  const secondValidation = validatePostCitations(draft.bodyMarkdown, sourceCount);
-  if (!secondValidation.ok) {
-    throw new Error(`Post citation validation failed: ${secondValidation.errors.join(" | ")}`);
-  }
+  const draft = await generateJson(client, model, basePrompt, blogSchema);
 
   const imagePrompt = buildImagePrompt(draft.title, imageStyle, draft.outline ?? []);
   return { ...draft, imagePrompt };
@@ -97,14 +82,70 @@ export async function generateHumanReply(
   model: string,
   agent: AgentConfig,
   postTitle: string,
-  humanComment: string
+  humanComment: string,
+  citationCatalog: string
 ): Promise<HumanReplyContent> {
-  const prompt = buildHumanResponsePrompt(agent, postTitle, humanComment);
+  const prompt = buildHumanResponsePrompt(agent, postTitle, humanComment, citationCatalog);
   const schema = z.object({
     replyMarkdown: z.string().min(20),
     followUpQuestion: z.string().min(5),
   });
   return generateJson(client, model, prompt, schema);
+}
+
+function collectInlineCitationNumbers(markdown: string): Set<number> {
+  const citedNumbers = new Set<number>();
+  for (const match of markdown.matchAll(/\[(\d+)\]/g)) {
+    citedNumbers.add(Number(match[1]));
+  }
+  return citedNumbers;
+}
+
+function getCitationValidationSentences(markdown: string): string[] {
+  return markdown
+    .replace(/\n+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function isLikelyFactualSentence(sentence: string): boolean {
+  return (
+    /\b(study|survey|paper|dataset|experiment)\b/i.test(sentence) ||
+    /\baccording to\b/i.test(sentence) ||
+    /\b\d+(\.\d+)?%\b/.test(sentence) ||
+    /\b\d+(\.\d+)?\s*(percent|percentage points?)\b/i.test(sentence)
+  );
+}
+
+function getMissingFactualCitationError(markdown: string): string | undefined {
+  for (const sentence of getCitationValidationSentences(markdown)) {
+    if (!isLikelyFactualSentence(sentence)) continue;
+    if (!/\[\d+\]/.test(sentence)) {
+      return `Factual sentence missing citation: "${sentence.slice(0, 80)}..."`;
+    }
+  }
+  return undefined;
+}
+
+export function validateFactualClaimCitations(
+  textMarkdown: string,
+  maxSourceNumber: number
+): { ok: boolean; errors: string[] } {
+  const errors: string[] = [];
+  const citedNumbers = collectInlineCitationNumbers(textMarkdown);
+  for (const cited of citedNumbers) {
+    if (cited < 1 || cited > maxSourceNumber) {
+      errors.push(`Inline citation [${cited}] is out of allowed source range 1-${maxSourceNumber}.`);
+    }
+  }
+
+  const factualCitationError = getMissingFactualCitationError(textMarkdown);
+  if (factualCitationError) {
+    errors.push(factualCitationError);
+  }
+
+  return { ok: errors.length === 0, errors };
 }
 
 export function validatePostCitations(
@@ -120,10 +161,7 @@ export function validatePostCitations(
   const articleBody = split[0] ?? "";
   const sourcesSection = split.slice(1).join("\n## Sources");
 
-  const citedNumbers = new Set<number>();
-  for (const match of articleBody.matchAll(/\[(\d+)\]/g)) {
-    citedNumbers.add(Number(match[1]));
-  }
+  const citedNumbers = collectInlineCitationNumbers(articleBody);
   if (citedNumbers.size === 0) {
     errors.push("No inline citations found in body.");
   }
@@ -143,22 +181,9 @@ export function validatePostCitations(
     }
   }
 
-  const sentences = articleBody
-    .replace(/\n+/g, " ")
-    .split(/(?<=[.!?])\s+/)
-    .map((value) => value.trim())
-    .filter(Boolean);
-  for (const sentence of sentences) {
-    const factual =
-      /\b(study|survey|paper|dataset|experiment)\b/i.test(sentence) ||
-      /\baccording to\b/i.test(sentence) ||
-      /\b\d+(\.\d+)?%\b/.test(sentence) ||
-      /\b\d+(\.\d+)?\s*(percent|percentage points?)\b/i.test(sentence);
-    if (!factual) continue;
-    if (!/\[\d+\]/.test(sentence)) {
-      errors.push(`Factual sentence missing citation: "${sentence.slice(0, 80)}..."`);
-      break;
-    }
+  const factualCitationError = getMissingFactualCitationError(articleBody);
+  if (factualCitationError) {
+    errors.push(factualCitationError);
   }
 
   return { ok: errors.length === 0, errors };

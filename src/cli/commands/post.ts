@@ -121,6 +121,7 @@ export async function runPostCommand(options: RunPostOptions = {}): Promise<Post
           base64,
           image.mimeType
         );
+        const heroUrl = imageUpload.url || undefined;
 
         const payload = buildDraftPostPayload(
           post.title,
@@ -128,7 +129,7 @@ export async function runPostCommand(options: RunPostOptions = {}): Promise<Post
           post.excerpt,
           config.BLOG_LANGUAGE,
           config.WIX_MEMBER_ID,
-          imageUpload.url,
+          heroUrl,
           parseIdList(config.BLOG_CATEGORY_IDS),
           parseIdList(config.BLOG_TAG_IDS)
         );
